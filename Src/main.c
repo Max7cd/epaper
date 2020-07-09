@@ -25,6 +25,9 @@
 /* USER CODE BEGIN Includes */
 #include "EPD_2in7.h"
 #include "stdlib.h"
+
+#include "DEV_Config.h"
+#include "GUI_Paint.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,14 +47,9 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-RTC_HandleTypeDef hrtc;
-
 SPI_HandleTypeDef hspi1;
 
 UART_HandleTypeDef huart3;
-DMA_HandleTypeDef hdma_usart3_rx;
-
-PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
@@ -61,15 +59,12 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
 static void MX_USART3_UART_Init(void);
-static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_SPI1_Init(void);
-static void MX_RTC_Init(void);
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 void DEV_DisplayImage(void);
-void DEV_InitMode(int mode);
+void DEV_Init();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -77,7 +72,9 @@ void DEV_InitMode(int mode);
 const UWORD Imagesize = 5808; //264*176/8
 UBYTE *BlackImage;
 
-int displaymode = 0; // 0 for black and white, 1 for 4-gray
+int buffer_pointer = 0;
+const int buffer_size = 37*14;
+char *msg;
 
 /* USER CODE END 0 */
 
@@ -88,6 +85,11 @@ int displaymode = 0; // 0 for black and white, 1 for 4-gray
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+	msg = (char *)malloc(buffer_size+1);
+	for(int i = 0; i < buffer_size; i++) {
+		msg[i] = 0x20;
+	}
+	msg[buffer_size] = 0x0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -108,20 +110,17 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_USART3_UART_Init();
-  MX_USB_OTG_FS_PCD_Init();
   MX_SPI1_Init();
-  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
   HAL_GPIO_WritePin(PWR_GPIO_Port, PWR_Pin, GPIO_PIN_SET);
 
   DEV_Module_Init();
-  DEV_InitMode(MODE_BW);
+  DEV_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
-  /* USER CODE BEGIN WHILE */;
+  /* USER CODE BEGIN WHILE */
 	while (1) {
 		// send the cpu to sleep
     	HAL_SuspendTick();
@@ -141,7 +140,6 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage 
   */
@@ -149,9 +147,8 @@ void SystemClock_Config(void)
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
   /** Initializes the CPU, AHB and APB busses clocks 
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
-  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 8;
@@ -176,93 +173,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_RTC|RCC_PERIPHCLK_CLK48;
-  PeriphClkInitStruct.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
-  PeriphClkInitStruct.Clk48ClockSelection = RCC_CLK48CLKSOURCE_PLLQ;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
-}
-
-/**
-  * @brief RTC Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_RTC_Init(void)
-{
-
-  /* USER CODE BEGIN RTC_Init 0 */
-
-  /* USER CODE END RTC_Init 0 */
-
-  RTC_TimeTypeDef sTime = {0};
-  RTC_DateTypeDef sDate = {0};
-  RTC_AlarmTypeDef sAlarm = {0};
-
-  /* USER CODE BEGIN RTC_Init 1 */
-
-  /* USER CODE END RTC_Init 1 */
-  /** Initialize RTC Only 
-  */
-  hrtc.Instance = RTC;
-  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 127;
-  hrtc.Init.SynchPrediv = 255;
-  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
-  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
-  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
-  if (HAL_RTC_Init(&hrtc) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /* USER CODE BEGIN Check_RTC_BKUP */
-    
-  /* USER CODE END Check_RTC_BKUP */
-
-  /** Initialize RTC and set the Time and Date 
-  */
-  sTime.Hours = 0x0;
-  sTime.Minutes = 0x0;
-  sTime.Seconds = 0x0;
-  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
-  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
-  sDate.Month = RTC_MONTH_JANUARY;
-  sDate.Date = 0x1;
-  sDate.Year = 0x0;
-
-  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /** Enable the Alarm A 
-  */
-  sAlarm.AlarmTime.Hours = 0x0;
-  sAlarm.AlarmTime.Minutes = 0x0;
-  sAlarm.AlarmTime.Seconds = 0x0;
-  sAlarm.AlarmTime.SubSeconds = 0x0;
-  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
-  sAlarm.AlarmMask = RTC_ALARMMASK_MINUTES;
-  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
-  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
-  sAlarm.AlarmDateWeekDay = 0x1;
-  sAlarm.Alarm = RTC_ALARM_A;
-  if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN RTC_Init 2 */
-
-  /* USER CODE END RTC_Init 2 */
-
 }
 
 /**
@@ -333,58 +243,6 @@ static void MX_USART3_UART_Init(void)
   /* USER CODE BEGIN USART3_Init 2 */
 
   /* USER CODE END USART3_Init 2 */
-
-}
-
-/**
-  * @brief USB_OTG_FS Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USB_OTG_FS_PCD_Init(void)
-{
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
-
-  /* USER CODE END USB_OTG_FS_Init 0 */
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
-
-  /* USER CODE END USB_OTG_FS_Init 1 */
-  hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
-  hpcd_USB_OTG_FS.Init.dev_endpoints = 6;
-  hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
-  hpcd_USB_OTG_FS.Init.dma_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
-  hpcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.battery_charging_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
-  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
-
-  /* USER CODE END USB_OTG_FS_Init 2 */
-
-}
-
-/** 
-  * Enable DMA controller clock
-  */
-static void MX_DMA_Init(void) 
-{
-
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
-
-  /* DMA interrupt init */
-  /* DMA1_Stream1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
 
 }
 
@@ -461,29 +319,27 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-void DEV_InitMode(int mode) {
+void DEV_Init() {
 	free(BlackImage);
-	BlackImage = (UBYTE *)malloc((Imagesize*(mode+1)));
-	displaymode = mode;
+	BlackImage = (UBYTE *)malloc(Imagesize);
 
-	if(mode == MODE_BW) {
-		EPD_2IN7_Init();
-	} else {
-		EPD_2IN7_Init_4Gray();
-	}
+	EPD_2IN7_Init();
 
 	EPD_2IN7_Clear();
+
+	Paint_NewImage(BlackImage, EPD_2IN7_WIDTH, EPD_2IN7_HEIGHT, 270, WHITE);
+
+	Paint_DrawString_EN(5, 5, msg, &Font12, WHITE, BLACK);
+	Paint_SelectImage(BlackImage);
+	Paint_Clear(WHITE);
+
 	DEV_Delay_ms(1000);
 
-	HAL_UART_Receive_DMA(&huart3, BlackImage, (Imagesize*(displaymode+1)));
+	HAL_UART_Receive_IT(&huart3, (uint8_t*)msg, 1);
 }
 
 void DEV_DisplayImage(void) {
-	if(displaymode == MODE_BW) {
-		EPD_2IN7_Display(BlackImage);
-	} else {
-		EPD_2IN7_4GrayDisplay(BlackImage);
-	}
+	EPD_2IN7_Display(BlackImage);
 	DEV_Delay_ms(1000);
 }
 
@@ -494,35 +350,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		HAL_ResumeTick();
 		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
 
-		DEV_DisplayImage();
+		buffer_pointer = (buffer_pointer + 1) % buffer_size;
 
 		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
-		HAL_UART_Receive_DMA(&huart3, BlackImage, (Imagesize*(displaymode+1)));
+		HAL_UART_Receive_IT(&huart3, (uint8_t*)(msg+buffer_pointer), 1);
 	}
-}
-
-
-void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
-{
-	HAL_ResumeTick();
-	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-
-	// Display should be reset at least once a day to stop "burn-in"
-	EPD_2IN7_Clear();
-	DEV_Delay_ms(1000);
-
-	DEV_DisplayImage();
-
-	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	HAL_ResumeTick();
     if (GPIO_Pin == GPIO_PIN_13) {
-    	HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-    	HAL_UART_DMAStop(&huart3);
-    	DEV_InitMode(HAL_GPIO_ReadPin(LD1_GPIO_Port, LD1_Pin));
+
+    	Paint_Clear(WHITE);
+    	Paint_DrawString_EN(5, 5, msg, &Font12, WHITE, BLACK);
+
+    	DEV_DisplayImage();
     }
 }
 /* USER CODE END 4 */
