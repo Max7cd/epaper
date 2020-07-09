@@ -90,6 +90,7 @@
 #
 ******************************************************************************/
 #include "EPD_2in7.h"
+#include "Debug.h"
 
 static const unsigned char EPD_2in7_lut_vcom_dc[] = {
     0x00	,0x00,
@@ -238,6 +239,7 @@ parameter:
 ******************************************************************************/
 static void EPD_2in7_ReadBusy(void)
 {
+    Debug("e-Paper busy\r\n");
     UBYTE busy;
     do {
         EPD_2in7_SendCommand(0x71);
@@ -245,6 +247,7 @@ static void EPD_2in7_ReadBusy(void)
         busy =!(busy & 0x01);
     } while(busy);
     DEV_Delay_ms(200);
+    Debug("e-Paper busy release\r\n");
 }
 
 /******************************************************************************
